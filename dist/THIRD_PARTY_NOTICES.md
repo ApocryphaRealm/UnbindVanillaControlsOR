@@ -1,6 +1,6 @@
 # Third-party components and their notices
 
-Unbind Vanilla Controls for Oblivion as a whole is GPL-3.0-or-later (`LICENSE`, `NOTICE.md`). Every component below is linked into
+Unbind Vanilla Controls (Oblivion Remastered) as a whole is GPL-3.0-or-later (`LICENSE`, `NOTICE.md`). Every component below is linked into
 UnbindVanillaControls.dll; each is under a GPL-compatible licence, and its notice is reproduced as that licence requires. Versions
 are the ones this build pins.
 

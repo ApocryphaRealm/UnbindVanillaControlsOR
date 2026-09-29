@@ -1,4 +1,4 @@
-# Unbind Vanilla Controls for Oblivion
+# Unbind Vanilla Controls (Oblivion Remastered)
 
 An OBSE64 plugin for The Elder Scrolls IV: Oblivion Remastered. On the game's own Controls page - keyboard and
 controller - press the key or button a row already has, and that slot is unbound.

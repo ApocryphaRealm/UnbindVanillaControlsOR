@@ -1,4 +1,4 @@
-# Unbind Vanilla Controls for Oblivion - copyright and licence
+# Unbind Vanilla Controls (Oblivion Remastered) - copyright and licence
 
 Copyright (C) 2026 ApocryphaRealm
 

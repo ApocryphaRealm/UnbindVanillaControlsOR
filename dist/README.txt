@@ -1,4 +1,4 @@
-Unbind Vanilla Controls for Oblivion
+Unbind Vanilla Controls (Oblivion Remastered)
 ====================================
 Version 1.0.0
 
