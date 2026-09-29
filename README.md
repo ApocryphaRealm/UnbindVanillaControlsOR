@@ -3,7 +3,7 @@
 An OBSE64 plugin for The Elder Scrolls IV: Oblivion Remastered. On the game's own Controls page - keyboard and
 controller - press the key or button a row already has, and that slot is unbound.
 
-Unreleased: built, not yet tried in game.
+**Version 1.0.0.**
 
 ## How it works
 
@@ -15,8 +15,9 @@ or `OnGamepadKeySelectorKeySelected`. Both arrive through ProcessEvent, so the p
 is that same key it hands the row "no key" instead, so the row records an empty binding. The next frame it reads the
 selector back and logs what the row shows.
 
-A key on a selector's cancel list (Esc; B on a controller) ends listening instead of being chosen, so a row bound to
-one of those cannot be unbound by pressing it again.
+A key on a selector's cancel list ends listening instead of being chosen, so a row bound to one of those cannot be
+unbound by pressing it again (B on a controller is not one - it unbinds like any other button). After an unbind the
+selector is emptied too, and the slot counts as empty until a key is chosen for it again, so the same key binds it back.
 
 ## Settings
 
