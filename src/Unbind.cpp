@@ -110,6 +110,86 @@ namespace unbind
 			return at ? *at : nullptr;
 		}
 
+		// The keys of a row's action in its mapping context, in order. Each Controls action keeps exactly three entries
+		// there - keyboard primary, keyboard secondary, controller - with None for an empty one (IMC_Game_Default,
+		// read in game 2026-09-29: OpenRestMenu = T, None, Gamepad_Special_Left; OpenOptionsMenu = Escape, F8, None).
+		std::vector<std::string> ActionKeys(UE::UObject* a_imc, UE::UObject* a_action)
+		{
+			std::vector<std::string> out;
+			static auto* mapping = UE::StaticFindObject<UE::UStruct>(nullptr, nullptr, L"/Script/EnhancedInput.EnhancedActionKeyMapping");
+			if (!a_imc || !a_action || !mapping) {
+				return out;
+			}
+			const auto size = mapping->propertiesSize;
+			const auto oAction = reflect::Offset(mapping, "Action");
+			const auto oKey = reflect::Offset(mapping, "Key");
+			struct RawArray
+			{
+				std::uint8_t* data;
+				std::int32_t  num;
+				std::int32_t  max;
+			};
+			auto* arr = reflect::At<RawArray>(a_imc, reflect::Offset(a_imc->GetClass(), "Mappings"));
+			for (std::int32_t i = 0; arr && size > 0 && oAction >= 0 && oKey >= 0 && i < arr->num; ++i) {
+				std::uint8_t* e = arr->data + static_cast<std::ptrdiff_t>(i) * size;
+				if (*reinterpret_cast<UE::UObject**>(e + oAction) == a_action) {
+					out.push_back(KeyName(e + oKey));
+				}
+			}
+			return out;
+		}
+
+		// The key a row's slot has now, from the row's own rebind data (GetRebindData: its action and mapping context)
+		std::string RowBinding(UE::UObject* a_row, std::size_t a_slot)
+		{
+			static auto* rowStruct = UE::StaticFindObject<UE::UStruct>(nullptr, nullptr, L"/Script/Altar.ModernRebindSettingTableRow");
+			static auto* dataStruct = UE::StaticFindObject<UE::UStruct>(nullptr, nullptr, L"/Script/Altar.ModernRebindData");
+			ue::Call c(a_row, L"GetRebindData");
+			auto* ret = static_cast<std::uint8_t*>(c ? c.At("ReturnValue") : nullptr);
+			if (!ret || !rowStruct || !dataStruct) {
+				logger::warn("unbind: GetRebindData / its row struct not found - the row's binding cannot be read");
+				return {};
+			}
+			c.Run();
+			const auto oData = reflect::Offset(rowStruct, "RebindData");
+			const auto oLabel = reflect::Offset(rowStruct, "Label");
+			auto* action = oData >= 0 ? *reinterpret_cast<UE::UObject**>(ret + oData + reflect::Offset(dataStruct, "InputAction")) : nullptr;
+			auto* imc = oData >= 0 ? *reinterpret_cast<UE::UObject**>(ret + oData + reflect::Offset(dataStruct, "MappingContext")) : nullptr;
+			const auto keys = ActionKeys(imc, action);
+			// the returned copy holds an FText and three FKeys: released here
+			if (oLabel >= 0) {
+				reinterpret_cast<UE::FText*>(ret + oLabel)->~FText();
+			}
+			for (const char* k : { "DefaultPrimaryGamepadKey", "DefaultPrimaryKeyboardKey", "DefaultSecondaryKeyboardKey" }) {
+				if (const auto o = reflect::Offset(dataStruct, k); oData >= 0 && o >= 0) {
+					reinterpret_cast<UE::FKey*>(ret + oData + o)->~FKey();
+				}
+			}
+			std::string key;
+			if (keys.size() == 3) {
+				key = keys[a_slot];
+			} else {
+				// not the three-entry shape: the controller slot is the gamepad key, the keyboard slots the others in order
+				std::vector<std::string> board;
+				for (const auto& k : keys) {
+					if (k.starts_with("Gamepad_")) {
+						if (a_slot == 2) {
+							key = k;
+						}
+					} else if (Bound(k)) {
+						board.push_back(k);
+					}
+				}
+				if (a_slot < 2 && a_slot < board.size()) {
+					key = board[a_slot];
+				}
+			}
+			logger::debug("unbind: row {} action {} in {}: keys [{}] - slot {} holds '{}'", static_cast<const void*>(a_row),
+				action ? pe::Utf8(action->GetFName().ToString()) : "?", imc ? pe::Utf8(imc->GetFName().ToString()) : "?",
+				[&] { std::string j; for (const auto& k : keys) { j += (j.empty() ? "" : ", ") + k; } return j; }(), a_slot, key);
+			return key;
+		}
+
 		int Kind(UE::UFunction* a_fn)
 		{
 			if (auto it = g_kind.find(a_fn); it != g_kind.end()) {
@@ -131,7 +211,7 @@ namespace unbind
 			return kind;
 		}
 
-		void OnListen(UE::UFunction* a_fn, void* a_params)
+		void OnListen(UE::UObject* a_row, UE::UFunction* a_fn, void* a_params)
 		{
 			auto* fs = reinterpret_cast<UE::UStruct*>(a_fn);
 			auto* target = reflect::At<UE::UObject*>(a_params, reflect::Offset(fs, "Target"));
@@ -144,12 +224,22 @@ namespace unbind
 				logger::debug("unbind: selector {} stopped listening", static_cast<const void*>(*target));
 				return;
 			}
+			// a selector's own key is only one chosen on the page this session (not yet applied); otherwise the row's
+			// binding comes from its action's mappings
 			std::string key = SelectorKey(*target);
-			const char* from = "its own key";
+			const char* from = "the key chosen on the page";
+			if (!Bound(key)) {
+				for (std::size_t i = 0; i < kSlots.size(); ++i) {
+					if (reflect::Offset(a_row->GetClass(), kSlots[i].selectorProperty) >= 0 && SelectorOf(a_row, kSlots[i].selectorProperty) == *target) {
+						key = RowBinding(a_row, i);
+						from = "the row's action mapping";
+					}
+				}
+			}
 			if (!Bound(key)) {
 				if (auto it = g_known.find(*target); it != g_known.end() && Bound(it->second)) {
 					key = it->second;
-					from = "the row's last known binding (the selector shows none while listening)";
+					from = "the row's last known binding";
 				}
 			}
 			g_before[*target] = key;
@@ -180,7 +270,7 @@ namespace unbind
 				++g_status.unbinds;
 				Note(std::format("{} slot: '{}' pressed again - unbound", a_slot.name, pressed));
 			} else {
-				logger::debug("unbind: {} slot: '{}' chosen (held '{}'){} - passed to the game unchanged", a_slot.name, pressed,
+				logger::info("unbind: {} slot: '{}' chosen (held '{}'){} - passed to the game unchanged", a_slot.name, pressed,
 					before.empty() ? "?" : before, same ? " - the mod is switched off (bEnabled=0)" : "");
 			}
 			if (selector) {
@@ -212,7 +302,7 @@ namespace unbind
 			}
 			const int kind = Kind(a_fn);
 			if (kind == kListen) {
-				OnListen(a_fn, a_params);
+				OnListen(a_row, a_fn, a_params);
 			} else if (kind == kUpdate) {
 				OnUpdate(a_row, a_fn, a_params);
 			} else if (kind >= 0) {
@@ -284,7 +374,7 @@ namespace unbind
 				std::string line = std::format("{} {}:", g_rows.size(), path == kKeyboardRow ? "keyboard" : "controller");
 				for (const auto& s : kSlots) {
 					if (auto* sel = reflect::Offset(row->GetClass(), s.selectorProperty) >= 0 ? SelectorOf(row, s.selectorProperty) : nullptr) {
-						line += std::format(" {}='{}'", s.name, SelectorKey(sel));
+						line += std::format(" {}='{}' (page '{}')", s.name, RowBinding(row, static_cast<std::size_t>(&s - kSlots.data())), SelectorKey(sel));
 					}
 				}
 				g_rows.push_back(row);
@@ -311,7 +401,11 @@ namespace unbind
 			return "that row has no " + a_slot + " slot";
 		}
 		// what a key press does: the selector starts listening (its key is remembered), then the key arrives
-		g_before[selector] = SelectorKey(selector);
+		std::string held = SelectorKey(selector);
+		if (!Bound(held)) {
+			held = RowBinding(row, static_cast<std::size_t>(slot - kSlots.data()));
+		}
+		g_before[selector] = held;
 		++g_status.listens;
 		ue::Call c(row, slot->handlerW);
 		auto* chord = static_cast<std::uint8_t*>(c ? c.At("NewInputChord") : nullptr);
