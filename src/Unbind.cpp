@@ -7,6 +7,7 @@
 #include "Ue.h"
 
 #include <unordered_map>
+#include <unordered_set>
 
 namespace unbind
 {
@@ -50,6 +51,10 @@ namespace unbind
 		// selector -> the last key the row was known to have (OnUpdateWidgetBinding, and every read-back): the fallback
 		// when a selector that starts listening already shows no key (a "press a key" prompt may blank it first)
 		std::unordered_map<UE::UObject*, std::string>  g_known;
+		// selectors whose slot this mod emptied on the page: the slot counts as empty until a key is chosen for it again
+		// (the owner's second test, 2026-09-29: after unbinding Jump, Y pressed again unbound it again instead of binding
+		// it - the selector and, until Apply, the action's mapping both still said Y)
+		std::unordered_set<UE::UObject*>               g_cleared;
 		std::vector<Pending>                           g_pending;
 		std::vector<UE::UObject*>                      g_rows;     // the tool's last row listing
 		std::int32_t                                   g_chordKey = -2;   // FInputChord::Key's offset (-2: not read yet)
@@ -102,6 +107,21 @@ namespace unbind
 			std::string name = KeyName(key);
 			key->~FKey();   // the returned chord's key may hold key details: released here
 			return name;
+		}
+
+		// Empties a selector's own key and display (UpdateSelectedKey with an empty chord - the buffer is zeroed, and a
+		// zeroed FKey is the None key). The selector keeps the key the player pressed even after the row stored "no key".
+		void ClearSelector(UE::UObject* a_selector)
+		{
+			if (!a_selector || !reflect::IsLive(a_selector)) {
+				return;
+			}
+			ue::Call c(a_selector, L"UpdateSelectedKey");
+			if (!c || !c.At("InSelectedKey")) {
+				logger::warn("unbind: the selector has no UpdateSelectedKey - its box keeps the old glyph");
+				return;
+			}
+			c.Run();
 		}
 
 		UE::UObject* SelectorOf(UE::UObject* a_row, const char* a_property)
@@ -228,7 +248,10 @@ namespace unbind
 			// binding comes from its action's mappings
 			std::string key = SelectorKey(*target);
 			const char* from = "the key chosen on the page";
-			if (!Bound(key)) {
+			if (g_cleared.contains(*target)) {
+				key = "None";
+				from = "unbound on this page";
+			} else if (!Bound(key)) {
 				for (std::size_t i = 0; i < kSlots.size(); ++i) {
 					if (reflect::Offset(a_row->GetClass(), kSlots[i].selectorProperty) >= 0 && SelectorOf(a_row, kSlots[i].selectorProperty) == *target) {
 						key = RowBinding(a_row, i);
@@ -268,8 +291,14 @@ namespace unbind
 				key->~FKey();
 				new (key) UE::FKey();   // no key: the row records an empty binding for this slot
 				++g_status.unbinds;
+				if (selector) {
+					g_cleared.insert(selector);
+				}
 				Note(std::format("{} slot: '{}' pressed again - unbound", a_slot.name, pressed));
 			} else {
+				if (selector && Bound(pressed)) {
+					g_cleared.erase(selector);   // a key chosen for the slot again: it is bound
+				}
 				logger::info("unbind: {} slot: '{}' chosen (held '{}'){} - passed to the game unchanged", a_slot.name, pressed,
 					before.empty() ? "?" : before, same ? " - the mod is switched off (bEnabled=0)" : "");
 			}
@@ -290,6 +319,9 @@ namespace unbind
 				auto* selector = SelectorOf(a_row, kSlots[i].selectorProperty);
 				if (key && selector) {
 					g_known[selector] = KeyName(key);
+					if (Bound(g_known[selector])) {
+						g_cleared.erase(selector);
+					}
 					logger::debug("unbind: row {} {} binding is '{}'", static_cast<const void*>(a_row), kSlots[i].name, g_known[selector]);
 				}
 			}
@@ -343,22 +375,32 @@ namespace unbind
 			return;
 		}
 		const auto now = tick::Reads();
-		for (auto it = g_pending.begin(); it != g_pending.end();) {
+		// worked on a copy: emptying a selector can make it broadcast again, and the observer then adds to g_pending
+		std::vector<Pending> work;
+		work.swap(g_pending);
+		for (auto it = work.begin(); it != work.end();) {
 			if (now < it->due) {
+				g_pending.push_back(*it);
 				++it;
 				continue;
 			}
-			const std::string shown = SelectorKey(it->selector);
-			if (!shown.empty()) {
+			std::string shown = SelectorKey(it->selector);
+			if (it->unbound && Bound(shown)) {
+				ClearSelector(it->selector);   // the row is unbound; the selector still draws the pressed key
+				const std::string after = SelectorKey(it->selector);
+				logger::info("unbind: {} selector held '{}' after the unbind - emptied, it now holds '{}'", it->slot, shown, after.empty() ? "?" : after);
+				shown = after;
+			}
+			if (!shown.empty() && !it->unbound) {
 				g_known[it->selector] = shown;
 			}
 			if (it->unbound) {
 				Note(std::format("{} slot now shows '{}'{}", it->slot, shown.empty() ? "?" : shown,
-					Bound(shown) ? " - the game kept the key (see the plan's fallback)" : " - empty, as intended"));
+					Bound(shown) ? " - the selector kept the key" : " - empty, as intended"));
 			} else {
 				logger::debug("unbind: {} slot now shows '{}' after '{}'", it->slot, shown.empty() ? "?" : shown, it->pressed);
 			}
-			it = g_pending.erase(it);
+			++it;
 		}
 	}
 
