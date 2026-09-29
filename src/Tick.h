@@ -4,7 +4,7 @@
 // The game-thread frame tick, by chaining the game executable's USER32!PeekMessageW import (the previous target is
 // kept and called, so other plugins chaining the same slot work in either order). Unreal's message pump calls it
 // every frame on the main thread; the callback runs at most once every 2 ms. OBSE64 has no main-loop interface.
-// Taken from Tween Menu (Oblivion Remastered), without its controller hook - this mod never reads the pad.
+// Taken from Tween Menu for Oblivion, without its controller hook - this mod never reads the pad.
 // ============================================================================================================
 
 namespace tick

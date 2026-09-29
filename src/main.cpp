@@ -1,4 +1,4 @@
-// Unbind Vanilla Controls (Oblivion Remastered) - plan: 4. plans\unbind-vanilla-controls-oblivion\PLAN.md.
+// Unbind Vanilla Controls for Oblivion Remastered - plan: 4. plans\unbind-vanilla-controls-oblivion\PLAN.md.
 #include "Settings.h"
 #include "Tick.h"
 #include "Tool.h"
