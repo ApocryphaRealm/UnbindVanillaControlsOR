@@ -3,6 +3,14 @@
 Written as changes happen, not reconstructed afterwards (rule 61). A version number is issued by the version gate
 only once a build is seen working in game (rule 48); until then the work sits under Unreleased.
 
+## Unreleased - 2026-10-01 - untested (built, not run)
+
+### Fixed
+- **Fixed: the reflection self-check no longer latches failure early in a launch.** A KeyIndex not found yet (the
+  class exists before its property chain is linked) now means "ask again", as Tween Menu OR c4625c8 does; a failure is
+  latched only for a property found at a wrong offset (gate rule or-reflect-selfcheck-never-latches-not-found; CCM went
+  completely dead this way on 2026-09-29).
+
 ## 1.0.0 - 2026-09-29 - working
 
 ### Added
